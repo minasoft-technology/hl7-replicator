@@ -17,7 +17,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-//go:embed all:../../web/*
+//go:embed all:web/*
 var webFiles embed.FS
 
 type Server struct {
@@ -77,8 +77,7 @@ func (s *Server) setupRoutes() {
 	api.GET("/consumers", s.handleGetConsumers)
 	
 	// Static files
-	webFS, _ := fs.Sub(webFiles, "web")
-	s.echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(webFS))))
+	s.echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(webFiles))))
 }
 
 func (s *Server) handleHealth(c echo.Context) error {

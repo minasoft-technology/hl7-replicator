@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HL7 Replicator - Kontrol Paneli</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="bg-gray-100">
+    <div x-data="dashboard()" x-init="init()" class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-blue-600 text-white shadow-lg">
+            <div class="container mx-auto px-4 py-4">
+                <div class="flex justify-between items-center">
+                    <h1 class="text-2xl font-bold">HL7 Replicator</h1>
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm">Durum: 
+                            <span x-text="status" :class="statusClass" class="font-semibold"></span>
+                        </span>
+                        <button @click="refreshData()" class="bg-blue-500 hover:bg-blue-700 px-3 py-1 rounded text-sm">
+                            Yenile
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Stats Cards -->
+        <div class="container mx-auto px-4 py-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-gray-500 text-sm font-medium">Toplam Mesaj</h3>
+                    <p class="text-3xl font-bold text-gray-900" x-text="stats.total || '0'"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-gray-500 text-sm font-medium">Başarılı</h3>
+                    <p class="text-3xl font-bold text-green-600" x-text="stats.successful || '0'"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-gray-500 text-sm font-medium">Başarısız</h3>
+                    <p class="text-3xl font-bold text-red-600" x-text="stats.failed || '0'"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-gray-500 text-sm font-medium">Bekleyen</h3>
+                    <p class="text-3xl font-bold text-yellow-600" x-text="stats.pending || '0'"></p>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="bg-white rounded-lg shadow p-4 mb-6">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Yön</label>
+                        <select x-model="filters.direction" @change="filterMessages()" 
+                                class="w-full border-gray-300 rounded-md shadow-sm">
+                            <option value="">Tümü</option>
+                            <option value="order">Order (HIS → ZenPACS)</option>
+                            <option value="report">Report (ZenPACS → HIS)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Durum</label>
+                        <select x-model="filters.status" @change="filterMessages()" 
+                                class="w-full border-gray-300 rounded-md shadow-sm">
+                            <option value="">Tümü</option>
+                            <option value="pending">Bekleyen</option>
+                            <option value="forwarded">İletildi</option>
+                            <option value="failed">Başarısız</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Hasta ID</label>
+                        <input type="text" x-model="filters.patientId" @input="filterMessages()"
+                               placeholder="Hasta ID ara..."
+                               class="w-full border-gray-300 rounded-md shadow-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Mesaj Tipi</label>
+                        <input type="text" x-model="filters.messageType" @input="filterMessages()"
+                               placeholder="ORU, ORM..."
+                               class="w-full border-gray-300 rounded-md shadow-sm">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Messages Table -->
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="px-4 py-3 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">HL7 Mesajları</h2>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Zaman
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Yön
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Tip
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Hasta ID
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Hasta Adı
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Durum
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    İşlemler
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <template x-for="message in filteredMessages" :key="message.id">
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" 
+                                        x-text="formatDate(message.timestamp)"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                        <span :class="getDirectionClass(message.direction)" 
+                                              class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full"
+                                              x-text="getDirectionText(message.direction)"></span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" 
+                                        x-text="message.message_type"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" 
+                                        x-text="message.patient_id || '-'"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900" 
+                                        x-text="message.patient_name || '-'"></td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                        <span :class="getStatusClass(message.status)" 
+                                              class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full"
+                                              x-text="getStatusText(message.status)"></span>
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                        <button @click="viewMessage(message)" 
+                                                class="text-blue-600 hover:text-blue-900">
+                                            Detay
+                                        </button>
+                                        <button x-show="message.status === 'failed'" 
+                                                @click="retryMessage(message.id)"
+                                                class="ml-2 text-orange-600 hover:text-orange-900">
+                                            Tekrar Dene
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <div x-show="filteredMessages.length === 0" class="text-center py-8 text-gray-500">
+                        Mesaj bulunamadı
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Message Detail Modal -->
+        <div x-show="showModal" x-cloak
+             class="fixed inset-0 overflow-y-auto z-50"
+             @click.away="showModal = false">
+            <div class="flex items-center justify-center min-h-screen px-4">
+                <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"></div>
+                
+                <div class="bg-white rounded-lg overflow-hidden shadow-xl transform transition-all max-w-3xl w-full">
+                    <div class="bg-blue-600 text-white px-6 py-4">
+                        <h3 class="text-lg font-semibold">Mesaj Detayı</h3>
+                    </div>
+                    
+                    <div class="p-6">
+                        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Mesaj ID</dt>
+                                <dd class="mt-1 text-sm text-gray-900" x-text="selectedMessage?.id"></dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Kontrol ID</dt>
+                                <dd class="mt-1 text-sm text-gray-900" x-text="selectedMessage?.message_control_id"></dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Kaynak</dt>
+                                <dd class="mt-1 text-sm text-gray-900" x-text="selectedMessage?.source_addr"></dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-gray-500">Hedef</dt>
+                                <dd class="mt-1 text-sm text-gray-900" x-text="selectedMessage?.destination_addr"></dd>
+                            </div>
+                        </dl>
+                        
+                        <div class="mt-4">
+                            <dt class="text-sm font-medium text-gray-500">Ham Mesaj</dt>
+                            <dd class="mt-1">
+                                <pre class="bg-gray-100 p-4 rounded text-xs overflow-x-auto" 
+                                     x-text="selectedMessage?.raw_message"></pre>
+                            </dd>
+                        </div>
+                        
+                        <div x-show="selectedMessage?.last_error" class="mt-4">
+                            <dt class="text-sm font-medium text-red-500">Hata Mesajı</dt>
+                            <dd class="mt-1 text-sm text-red-600" x-text="selectedMessage?.last_error"></dd>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-gray-50 px-6 py-3">
+                        <button @click="showModal = false" 
+                                class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded">
+                            Kapat
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>
