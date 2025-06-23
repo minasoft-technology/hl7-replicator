@@ -125,7 +125,7 @@ Key environment variables:
 ## Deployment Considerations
 
 1. Always mount `/data` volume for persistence
-2. Expose ports 7001, 7002, and 8080
+2. Expose ports 7001, 7002, and 5678
 3. Configure `HOSPITAL_HIS_HOST/PORT` for each hospital
 4. Monitor disk usage for NATS storage
 5. Use Docker health checks for monitoring

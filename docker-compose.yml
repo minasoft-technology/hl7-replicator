@@ -8,7 +8,7 @@ services:
     ports:
       - "7001:7001"  # Order receiver (HIS -> ZenPACS)
       - "7002:7002"  # Report receiver (ZenPACS -> HIS)
-      - "8080:8080"  # Web dashboard
+      - "5678:5678"  # Web dashboard
     environment:
       # HL7 Listener Ports
       - ORDER_LISTEN_PORT=7001
@@ -23,7 +23,7 @@ services:
       - HOSPITAL_HIS_PORT=${HOSPITAL_HIS_PORT:-7200}
       
       # Web dashboard
-      - WEB_PORT=8080
+      - WEB_PORT=5678
       
       # Data storage
       - DB_PATH=/data
@@ -35,7 +35,7 @@ services:
     networks:
       - hl7-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/api/health"]
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:5678/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

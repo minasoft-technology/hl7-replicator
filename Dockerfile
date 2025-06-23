@@ -47,7 +47,7 @@ RUN chown -R app:app /app
 USER app
 
 # Expose ports
-EXPOSE 7001 7002 8080
+EXPOSE 7001 7002 5678
 
 # Volume for persistent data
 VOLUME ["/data"]

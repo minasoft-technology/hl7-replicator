@@ -30,7 +30,7 @@ func Load() (*Config, error) {
 		ZenPACSPort:      getEnvAsInt("ZENPACS_HL7_PORT", 2575),
 		HospitalHISHost:  getEnv("HOSPITAL_HIS_HOST", "localhost"),
 		HospitalHISPort:  getEnvAsInt("HOSPITAL_HIS_PORT", 7200),
-		WebPort:          getEnvAsInt("WEB_PORT", 8080),
+		WebPort:          getEnvAsInt("WEB_PORT", 5678),
 		DBPath:           getEnv("DB_PATH", "/data/messages.db"),
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
 	}
