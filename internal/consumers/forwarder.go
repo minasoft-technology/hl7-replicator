@@ -60,25 +60,18 @@ func (f *MessageForwarder) startOrderConsumer(ctx context.Context) error {
 			"stream", "HL7_ORDERS",
 			"destination", fmt.Sprintf("%s:%d", f.config.ZenPACSHost, f.config.ZenPACSPort))
 		
-		cons, err := consumer.Messages()
+		cons, err := consumer.Consume(func(msg jetstream.Msg) {
+			// Process message
+			f.processOrderMessage(msg, zenpacsClient)
+		})
 		if err != nil {
-			slog.Error("Consumer messages hatası", "error", err)
+			slog.Error("Consumer hatası", "error", err)
 			return
 		}
 		
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg := <-cons.Messages():
-				if msg == nil {
-					continue
-				}
-				
-				// Process message
-				f.processOrderMessage(msg, zenpacsClient)
-			}
-		}
+		// Wait for context cancellation
+		<-ctx.Done()
+		cons.Stop()
 	}()
 	
 	return nil
@@ -105,25 +98,18 @@ func (f *MessageForwarder) startReportConsumer(ctx context.Context) error {
 			"stream", "HL7_REPORTS", 
 			"destination", fmt.Sprintf("%s:%d", f.config.HospitalHISHost, f.config.HospitalHISPort))
 		
-		cons, err := consumer.Messages()
+		cons, err := consumer.Consume(func(msg jetstream.Msg) {
+			// Process message
+			f.processReportMessage(msg, hisClient)
+		})
 		if err != nil {
-			slog.Error("Consumer messages hatası", "error", err)
+			slog.Error("Consumer hatası", "error", err)
 			return
 		}
 		
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg := <-cons.Messages():
-				if msg == nil {
-					continue
-				}
-				
-				// Process message
-				f.processReportMessage(msg, hisClient)
-			}
-		}
+		// Wait for context cancellation
+		<-ctx.Done()
+		cons.Stop()
 	}()
 	
 	return nil

@@ -5,7 +5,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
@@ -112,7 +111,7 @@ func (s *Server) handleStats(c echo.Context) error {
 	reportInfo, _ := reportStream.Info(ctx)
 	
 	// Calculate stats
-	total := orderInfo.State.Messages + reportInfo.State.Messages
+	total := orderInfo.State.Msgs + reportInfo.State.Msgs
 	
 	// Get consumer info for detailed stats
 	orderConsumer, _ := orderStream.Consumer(ctx, "order-forwarder")
@@ -189,7 +188,7 @@ func (s *Server) handleGetMessages(c echo.Context) error {
 }
 
 func (s *Server) handleRetryMessage(c echo.Context) error {
-	messageID := c.Param("id")
+	// messageID := c.Param("id")
 	
 	// This would republish the message to the appropriate stream
 	// For now, return success
@@ -216,7 +215,7 @@ func (s *Server) handleGetStreams(c echo.Context) error {
 		
 		streams = append(streams, db.StreamInfo{
 			Name:          info.Config.Name,
-			Messages:      info.State.Messages,
+			Messages:      info.State.Msgs,
 			Bytes:         info.State.Bytes,
 			FirstSequence: info.State.FirstSeq,
 			LastSequence:  info.State.LastSeq,
@@ -254,8 +253,8 @@ func (s *Server) handleGetConsumers(c echo.Context) error {
 				Name:            info.Name,
 				Pending:         info.NumPending,
 				Delivered:       info.Delivered.Consumer,
-				AckPending:      info.NumAckPending,
-				RedeliveryCount: info.NumRedelivered,
+				AckPending:      uint64(info.NumAckPending),
+				RedeliveryCount: uint64(info.NumRedelivered),
 			})
 		}
 	}
