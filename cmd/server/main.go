@@ -117,8 +117,8 @@ func printStartupInfo(cfg *config.Config) {
 `
 	zenpacsEndpoint := cfg.ZenPACSHost + ":" + fmt.Sprintf("%d", cfg.ZenPACSPort)
 	hospitalEndpoint := cfg.HospitalHISHost + ":" + fmt.Sprintf("%d", cfg.HospitalHISPort)
-	
-	fmt.Printf(info, 
+
+	fmt.Printf(info,
 		cfg.OrderListenPort,
 		cfg.ReportListenPort,
 		cfg.WebPort,

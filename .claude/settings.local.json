@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(gh workflow list:*)",
+      "Bash(gh run view:*)",
+      "Bash(go fmt:*)"
+    ],
+    "deny": []
+  }
+}

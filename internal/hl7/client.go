@@ -10,72 +10,72 @@ import (
 )
 
 type MLLPClient struct {
-	host string
-	port int
+	host    string
+	port    int
 	timeout time.Duration
 }
 
 func NewMLLPClient(host string, port int) *MLLPClient {
 	return &MLLPClient{
-		host: host,
-		port: port,
+		host:    host,
+		port:    port,
 		timeout: 30 * time.Second,
 	}
 }
 
 func (c *MLLPClient) SendMessage(message []byte) error {
 	addr := fmt.Sprintf("%s:%d", c.host, c.port)
-	
+
 	// Connect to server
 	conn, err := net.DialTimeout("tcp", addr, c.timeout)
 	if err != nil {
 		return fmt.Errorf("bağlantı hatası %s: %w", addr, err)
 	}
 	defer conn.Close()
-	
+
 	slog.Debug("HL7 sunucusuna bağlandı", "address", addr)
-	
+
 	// Wrap message with MLLP if not already wrapped
 	wrappedMessage := WrapMLLP(message)
-	
+
 	// Set write deadline
 	conn.SetWriteDeadline(time.Now().Add(c.timeout))
-	
+
 	// Send message
 	_, err = conn.Write(wrappedMessage)
 	if err != nil {
 		return fmt.Errorf("mesaj gönderme hatası: %w", err)
 	}
-	
+
 	slog.Debug("HL7 mesaj gönderildi", "size", len(wrappedMessage))
-	
+
 	// Set read deadline for ACK
 	conn.SetReadDeadline(time.Now().Add(c.timeout))
-	
+
 	// Read ACK
 	reader := bufio.NewReader(conn)
 	ack, err := c.readMLLPMessage(reader)
 	if err != nil {
 		return fmt.Errorf("ACK okuma hatası: %w", err)
 	}
-	
+
 	// Parse ACK
 	ackParsed, err := ParseMessage(ack)
 	if err != nil {
 		return fmt.Errorf("ACK parse hatası: %w", err)
 	}
-	
+
 	// Check ACK code
 	ackCode := c.extractACKCode(ack)
 	if ackCode != "AA" && ackCode != "CA" {
 		return fmt.Errorf("negatif ACK alındı: %s", ackCode)
 	}
-	
+
 	slog.Info("HL7 mesaj başarıyla gönderildi",
 		"address", addr,
 		"messageControlID", ackParsed["message_control_id"],
 		"ackCode", ackCode)
-	
+
 	return nil
 }
 
@@ -90,7 +90,7 @@ func (c *MLLPClient) readMLLPMessage(reader *bufio.Reader) ([]byte, error) {
 			break
 		}
 	}
-	
+
 	// Read until end block
 	var buffer bytes.Buffer
 	for {
@@ -98,7 +98,7 @@ func (c *MLLPClient) readMLLPMessage(reader *bufio.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		
+
 		if b == EndBlock {
 			// Read carriage return
 			cr, err := reader.ReadByte()
@@ -110,10 +110,10 @@ func (c *MLLPClient) readMLLPMessage(reader *bufio.Reader) ([]byte, error) {
 			}
 			break
 		}
-		
+
 		buffer.WriteByte(b)
 	}
-	
+
 	return buffer.Bytes(), nil
 }
 

@@ -41,7 +41,7 @@ func NewEmbeddedServer(dataDir string) (*EmbeddedServer, error) {
 
 	// Sunucuyu başlat
 	ns.Start()
-	
+
 	// Hazır olmasını bekle
 	if !ns.ReadyForConnections(10 * time.Second) {
 		return nil, fmt.Errorf("NATS sunucu başlatılamadı")
@@ -129,27 +129,27 @@ func (es *EmbeddedServer) createStreams() error {
 
 func (es *EmbeddedServer) createKVStore() error {
 	ctx := context.Background()
-	
+
 	// Create KV store for statistics
 	statsKV, err := es.js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
 		Bucket:      "HL7_STATS",
 		Description: "HL7 mesaj istatistikleri",
 		History:     10,
-		TTL:         0, // No expiry
+		TTL:         0,           // No expiry
 		MaxBytes:    1024 * 1024, // 1MB
 		Storage:     jetstream.FileStorage,
 	})
 	if err != nil {
 		return fmt.Errorf("stats KV store oluşturulamadı: %w", err)
 	}
-	
+
 	// Initialize statistics
 	keys := []string{
 		"total_orders", "successful_orders", "failed_orders",
 		"total_reports", "successful_reports", "failed_reports",
 		"last_order_time", "last_report_time",
 	}
-	
+
 	for _, key := range keys {
 		if _, err := statsKV.Get(ctx, key); err != nil {
 			// Key doesn't exist, initialize with 0
@@ -158,22 +158,22 @@ func (es *EmbeddedServer) createKVStore() error {
 			}
 		}
 	}
-	
+
 	slog.Info("HL7_STATS KV store oluşturuldu")
-	
+
 	// Create KV store for dead letter queue (failed messages)
 	_, err = es.js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
 		Bucket:      "HL7_DLQ",
 		Description: "Başarısız HL7 mesajları (Dead Letter Queue)",
-		History:     1,           // Keep only latest version
+		History:     1,                  // Keep only latest version
 		TTL:         7 * 24 * time.Hour, // 7 days
-		MaxBytes:    100 * 1024 * 1024, // 100MB
+		MaxBytes:    100 * 1024 * 1024,  // 100MB
 		Storage:     jetstream.FileStorage,
 	})
 	if err != nil {
 		return fmt.Errorf("DLQ KV store oluşturulamadı: %w", err)
 	}
-	
+
 	slog.Info("HL7_DLQ KV store oluşturuldu")
 	return nil
 }

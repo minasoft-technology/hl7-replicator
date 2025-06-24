@@ -39,8 +39,8 @@ func (s *MLLPServer) Start(ctx context.Context) error {
 	}
 	s.listener = listener
 
-	slog.Info("HL7 MLLP sunucu başlatıldı", 
-		"port", s.port, 
+	slog.Info("HL7 MLLP sunucu başlatıldı",
+		"port", s.port,
 		"direction", s.direction,
 		"address", addr)
 
@@ -62,7 +62,7 @@ func (s *MLLPServer) acceptConnections(ctx context.Context) {
 				slog.Error("Bağlantı kabul hatası", "error", err)
 				continue
 			}
-			
+
 			go s.handleConnection(ctx, conn)
 		}
 	}
@@ -70,12 +70,12 @@ func (s *MLLPServer) acceptConnections(ctx context.Context) {
 
 func (s *MLLPServer) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
-	
+
 	remoteAddr := conn.RemoteAddr().String()
 	slog.Info("Yeni HL7 bağlantısı", "remoteAddr", remoteAddr, "direction", s.direction)
-	
+
 	reader := bufio.NewReader(conn)
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -83,7 +83,7 @@ func (s *MLLPServer) handleConnection(ctx context.Context, conn net.Conn) {
 		default:
 			// Set read timeout
 			conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-			
+
 			// Read MLLP message
 			message, err := s.readMLLPMessage(reader)
 			if err != nil {
@@ -97,7 +97,7 @@ func (s *MLLPServer) handleConnection(ctx context.Context, conn net.Conn) {
 				slog.Error("Mesaj okuma hatası", "error", err, "remoteAddr", remoteAddr)
 				return
 			}
-			
+
 			// Process message
 			if err := s.processMessage(message, remoteAddr); err != nil {
 				slog.Error("Mesaj işleme hatası", "error", err)
@@ -122,7 +122,7 @@ func (s *MLLPServer) readMLLPMessage(reader *bufio.Reader) ([]byte, error) {
 			break
 		}
 	}
-	
+
 	// Read until end block
 	var buffer bytes.Buffer
 	for {
@@ -130,7 +130,7 @@ func (s *MLLPServer) readMLLPMessage(reader *bufio.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		
+
 		if b == EndBlock {
 			// Read carriage return
 			cr, err := reader.ReadByte()
@@ -142,10 +142,10 @@ func (s *MLLPServer) readMLLPMessage(reader *bufio.Reader) ([]byte, error) {
 			}
 			break
 		}
-		
+
 		buffer.WriteByte(b)
 	}
-	
+
 	return buffer.Bytes(), nil
 }
 
@@ -155,7 +155,7 @@ func (s *MLLPServer) processMessage(rawMessage []byte, sourceAddr string) error 
 	if err != nil {
 		return fmt.Errorf("mesaj parse hatası: %w", err)
 	}
-	
+
 	// Create message object
 	msg := &db.HL7Message{
 		ID:               uuid.New().String(),
@@ -170,7 +170,7 @@ func (s *MLLPServer) processMessage(rawMessage []byte, sourceAddr string) error 
 		Status:           "pending",
 		CreatedAt:        time.Now(),
 	}
-	
+
 	// Set destination based on direction
 	if s.direction == "order" {
 		msg.DestinationAddr = "194.187.253.34:2575" // ZenPACS
@@ -178,27 +178,27 @@ func (s *MLLPServer) processMessage(rawMessage []byte, sourceAddr string) error 
 		// This will be configured from environment
 		msg.DestinationAddr = "hospital_his"
 	}
-	
+
 	// Publish to NATS JetStream
 	subject := fmt.Sprintf("hl7.%ss.%s", s.direction, msg.ID)
-	
+
 	msgData, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("mesaj serialize hatası: %w", err)
 	}
-	
+
 	_, err = s.js.Publish(context.Background(), subject, msgData)
 	if err != nil {
 		return fmt.Errorf("NATS publish hatası: %w", err)
 	}
-	
+
 	slog.Info("HL7 mesaj alındı ve kuyruğa eklendi",
 		"id", msg.ID,
 		"direction", s.direction,
 		"messageType", msg.MessageType,
 		"patientID", msg.PatientID,
 		"source", sourceAddr)
-	
+
 	return nil
 }
 

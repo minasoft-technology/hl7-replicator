@@ -9,15 +9,15 @@ import (
 )
 
 type Config struct {
-	OrderListenPort    int
-	ReportListenPort   int
-	ZenPACSHost        string
-	ZenPACSPort        int
-	HospitalHISHost    string
-	HospitalHISPort    int
-	WebPort            int
-	DBPath             string
-	LogLevel           string
+	OrderListenPort  int
+	ReportListenPort int
+	ZenPACSHost      string
+	ZenPACSPort      int
+	HospitalHISHost  string
+	HospitalHISPort  int
+	WebPort          int
+	DBPath           string
+	LogLevel         string
 }
 
 func Load() (*Config, error) {
@@ -36,7 +36,7 @@ func Load() (*Config, error) {
 	}
 
 	setupLogger(cfg.LogLevel)
-	
+
 	slog.Info("Yapılandırma yüklendi",
 		"orderPort", cfg.OrderListenPort,
 		"reportPort", cfg.ReportListenPort,
@@ -81,7 +81,7 @@ func setupLogger(level string) {
 	opts := &slog.HandlerOptions{
 		Level: logLevel,
 	}
-	
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, opts))
 	slog.SetDefault(logger)
 }
