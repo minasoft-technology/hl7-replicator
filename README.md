@@ -1,5 +1,8 @@
 # HL7 Replicator
 
+[![Docker Build and Publish](https://github.com/minasoft-technology/hl7-replicator/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/minasoft-technology/hl7-replicator/actions/workflows/docker-publish.yml)
+[![Test and Lint](https://github.com/minasoft-technology/hl7-replicator/actions/workflows/test.yml/badge.svg)](https://github.com/minasoft-technology/hl7-replicator/actions/workflows/test.yml)
+
 HL7 Replicator, hastane ağı kısıtlamalarını aşmak için tasarlanmış bir HL7 mesaj yönlendirme ve replikasyon aracıdır. Hastane HIS sisteminden gelen order mesajlarını ZenPACS'a, ZenPACS'tan gelen rapor mesajlarını da hastane HIS sistemine iletir.
 
 ## 🎯 Özellikler
@@ -17,11 +20,28 @@ HL7 Replicator, hastane ağı kısıtlamalarını aşmak için tasarlanmış bir
 
 ```bash
 # Repository'yi klonlayın
-git clone https://github.com/minasoft/hl7-replicator.git
+git clone https://github.com/minasoft-technology/hl7-replicator.git
 cd hl7-replicator
 
 # Docker ile başlatın
 docker-compose up -d
+```
+
+### GitHub Container Registry'den Çalıştırma
+
+```bash
+# En son image'ı çekin
+docker pull ghcr.io/minasoft-technology/hl7-replicator:latest
+
+# Çalıştırın
+docker run -d \
+  --name hl7-replicator \
+  -p 5678:5678 \
+  -p 7001:7001 \
+  -p 7002:7002 \
+  -e HOSPITAL_HIS_HOST=his.hastane.local \
+  -e HOSPITAL_HIS_PORT=7200 \
+  ghcr.io/minasoft-technology/hl7-replicator:latest
 ```
 
 ### Binary ile Çalıştırma
@@ -52,7 +72,7 @@ HOSPITAL_HIS_HOST=his.hastane.local
 HOSPITAL_HIS_PORT=7200
 
 # Web Dashboard
-WEB_PORT=8080
+WEB_PORT=5678
 
 # Veri Depolama
 DB_PATH=/data
@@ -94,7 +114,7 @@ cp .env.example .env
 
 ## 📊 Web Dashboard
 
-Web dashboard'a `http://localhost:8080` adresinden erişebilirsiniz.
+Web dashboard'a `http://localhost:5678` adresinden erişebilirsiniz.
 
 ### Özellikler:
 - Gerçek zamanlı mesaj izleme
@@ -149,5 +169,5 @@ Bu proje MIT lisansı altında lisanslanmıştır.
 ## 📞 Destek
 
 Sorularınız veya sorunlarınız için:
-- GitHub Issues: [github.com/minasoft/hl7-replicator/issues](https://github.com/minasoft/hl7-replicator/issues)
+- GitHub Issues: [github.com/minasoft-technology/hl7-replicator/issues](https://github.com/minasoft-technology/hl7-replicator/issues)
 - Email: support@minasoft.com

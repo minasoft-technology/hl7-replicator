@@ -44,13 +44,21 @@ function dashboard() {
 
         async loadMessages() {
             try {
-                const response = await fetch('/api/messages?limit=100');
+                // Load only failed messages from DLQ
+                const response = await fetch('/api/messages?status=failed');
                 if (response.ok) {
-                    this.messages = await response.json();
+                    const data = await response.json();
+                    // Check if it's an error response
+                    if (data.message) {
+                        this.messages = [];
+                    } else {
+                        this.messages = data;
+                    }
                     this.filterMessages();
                 }
             } catch (error) {
                 console.error('Mesaj yükleme hatası:', error);
+                this.messages = [];
             }
         },
 

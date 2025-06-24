@@ -5,8 +5,11 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -76,7 +79,30 @@ func (s *Server) setupRoutes() {
 	api.GET("/consumers", s.handleGetConsumers)
 	
 	// Static files
-	s.echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(webFiles))))
+	// Serve static files from embedded filesystem
+	webFS, err := fs.Sub(webFiles, "web")
+	if err != nil {
+		slog.Error("Web dosyaları yüklenemedi", "error", err)
+		return
+	}
+
+	// Specific route for root first
+	s.echo.GET("/", func(c echo.Context) error {
+		file, err := webFS.Open("index.html")
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		
+		data, err := io.ReadAll(file)
+		if err != nil {
+			return err
+		}
+		return c.HTML(http.StatusOK, string(data))
+	})
+	
+	// Then generic static file handler
+	s.echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(webFS))))
 }
 
 func (s *Server) handleHealth(c echo.Context) error {
@@ -96,38 +122,55 @@ func (s *Server) handleHealth(c echo.Context) error {
 func (s *Server) handleStats(c echo.Context) error {
 	ctx := c.Request().Context()
 	
-	// Get stream info for both streams
-	orderStream, err := s.js.Stream(ctx, "HL7_ORDERS")
+	// Get stats from KV store
+	statsKV, err := s.js.KeyValue(ctx, "HL7_STATS")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "Stats KV erişilemedi")
 	}
 	
-	reportStream, err := s.js.Stream(ctx, "HL7_REPORTS")
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	// Helper function to get KV value as int
+	getKVInt := func(key string) int {
+		entry, err := statsKV.Get(ctx, key)
+		if err != nil {
+			return 0
+		}
+		var val int
+		fmt.Sscanf(string(entry.Value()), "%d", &val)
+		return val
 	}
 	
-	orderInfo, _ := orderStream.Info(ctx)
-	reportInfo, _ := reportStream.Info(ctx)
+	// Get all statistics
+	totalOrders := getKVInt("total_orders")
+	successfulOrders := getKVInt("successful_orders")
+	failedOrders := getKVInt("failed_orders")
 	
-	// Calculate stats
-	total := orderInfo.State.Msgs + reportInfo.State.Msgs
-	
-	// Get consumer info for detailed stats
-	orderConsumer, _ := orderStream.Consumer(ctx, "order-forwarder")
-	reportConsumer, _ := reportStream.Consumer(ctx, "report-forwarder")
-	
-	orderConsumerInfo, _ := orderConsumer.Info(ctx)
-	reportConsumerInfo, _ := reportConsumer.Info(ctx)
-	
-	pending := orderConsumerInfo.NumPending + reportConsumerInfo.NumPending
-	delivered := orderConsumerInfo.Delivered.Consumer + reportConsumerInfo.Delivered.Consumer
+	totalReports := getKVInt("total_reports")
+	successfulReports := getKVInt("successful_reports")
+	failedReports := getKVInt("failed_reports")
 	
 	stats := map[string]interface{}{
-		"total": total,
-		"successful": delivered,
-		"failed": orderConsumerInfo.NumRedelivered + reportConsumerInfo.NumRedelivered,
-		"pending": pending,
+		"total": totalOrders + totalReports,
+		"successful": successfulOrders + successfulReports,
+		"failed": failedOrders + failedReports,
+		"pending": 0, // We don't track pending anymore
+		"orders": map[string]int{
+			"total": totalOrders,
+			"successful": successfulOrders,
+			"failed": failedOrders,
+		},
+		"reports": map[string]int{
+			"total": totalReports,
+			"successful": successfulReports,
+			"failed": failedReports,
+		},
+	}
+	
+	// Add last message times
+	if lastOrderTime, err := statsKV.Get(ctx, "last_order_time"); err == nil {
+		stats["last_order_time"] = string(lastOrderTime.Value())
+	}
+	if lastReportTime, err := statsKV.Get(ctx, "last_report_time"); err == nil {
+		stats["last_report_time"] = string(lastReportTime.Value())
 	}
 	
 	return c.JSON(http.StatusOK, stats)
@@ -135,54 +178,53 @@ func (s *Server) handleStats(c echo.Context) error {
 
 func (s *Server) handleGetMessages(c echo.Context) error {
 	ctx := c.Request().Context()
-	limit := 100 // Default limit
+	showFailed := c.QueryParam("status") == "failed"
 	
 	messages := []db.HL7Message{}
 	
-	// Get messages from both streams
-	for _, streamName := range []string{"HL7_ORDERS", "HL7_REPORTS"} {
-		stream, err := s.js.Stream(ctx, streamName)
+	if showFailed {
+		// Get failed messages from DLQ
+		dlqKV, err := s.js.KeyValue(ctx, "HL7_DLQ")
 		if err != nil {
-			continue
+			return echo.NewHTTPError(http.StatusInternalServerError, "DLQ erişilemedi")
 		}
 		
-		// Get last N messages
-		consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-			Name: fmt.Sprintf("web-reader-%d", time.Now().Unix()),
-			DeliverPolicy: jetstream.DeliverLastPolicy,
-			AckPolicy: jetstream.AckNonePolicy,
-		})
+		// List all keys in DLQ
+		keys, err := dlqKV.Keys(ctx)
 		if err != nil {
-			continue
+			// Return empty array if no keys
+			if err.Error() == "nats: no keys found" {
+				return c.JSON(http.StatusOK, messages)
+			}
+			return echo.NewHTTPError(http.StatusInternalServerError, "DLQ keys okunamadı: " + err.Error())
 		}
 		
-		// Fetch messages
-		msgBatch, _ := consumer.Fetch(limit, jetstream.FetchMaxWait(1*time.Second))
-		for msg := range msgBatch.Messages() {
-			var hl7Msg db.HL7Message
-			if err := json.Unmarshal(msg.Data(), &hl7Msg); err == nil {
-				messages = append(messages, hl7Msg)
+		for _, key := range keys {
+			entry, err := dlqKV.Get(ctx, key)
+			if err != nil {
+				continue
+			}
+			
+			var msg db.HL7Message
+			if err := json.Unmarshal(entry.Value(), &msg); err == nil {
+				messages = append(messages, msg)
 			}
 		}
-		
-		// Clean up temporary consumer
-		stream.DeleteConsumer(ctx, consumer.CachedInfo().Name)
+	} else {
+		// Get recent successful messages (last 100)
+		// For successful messages, we can show basic stats from KV
+		_, err := s.js.KeyValue(ctx, "HL7_STATS")
+		if err == nil {
+			// Return empty array for now since we're not storing successful messages
+			// In production, you might want to keep a circular buffer of recent messages
+			return c.JSON(http.StatusOK, messages)
+		}
 	}
 	
 	// Sort by timestamp (newest first)
-	// Simple bubble sort for demo
-	for i := 0; i < len(messages)-1; i++ {
-		for j := 0; j < len(messages)-i-1; j++ {
-			if messages[j].Timestamp.Before(messages[j+1].Timestamp) {
-				messages[j], messages[j+1] = messages[j+1], messages[j]
-			}
-		}
-	}
-	
-	// Limit results
-	if len(messages) > limit {
-		messages = messages[:limit]
-	}
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].Timestamp.After(messages[j].Timestamp)
+	})
 	
 	return c.JSON(http.StatusOK, messages)
 }
