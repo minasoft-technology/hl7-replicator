@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
-	"net"
 	"time"
 )
 
@@ -13,6 +12,7 @@ type MLLPClient struct {
 	host    string
 	port    int
 	timeout time.Duration
+	pool    *ConnectionPool
 }
 
 func NewMLLPClient(host string, port int) *MLLPClient {
@@ -20,14 +20,15 @@ func NewMLLPClient(host string, port int) *MLLPClient {
 		host:    host,
 		port:    port,
 		timeout: 30 * time.Second,
+		pool:    NewConnectionPool(host, port, 5),
 	}
 }
 
 func (c *MLLPClient) SendMessage(message []byte) error {
 	addr := fmt.Sprintf("%s:%d", c.host, c.port)
 
-	// Connect to server
-	conn, err := net.DialTimeout("tcp", addr, c.timeout)
+	// Get connection from pool
+	conn, err := c.pool.Get()
 	if err != nil {
 		return fmt.Errorf("bağlantı hatası %s: %w", addr, err)
 	}
@@ -133,11 +134,18 @@ func (c *MLLPClient) extractACKCode(ack []byte) string {
 
 // TestConnection tests if the HL7 server is reachable
 func (c *MLLPClient) TestConnection() error {
-	addr := fmt.Sprintf("%s:%d", c.host, c.port)
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	conn, err := c.pool.Get()
 	if err != nil {
-		return fmt.Errorf("bağlantı testi başarısız %s: %w", addr, err)
+		return fmt.Errorf("bağlantı testi başarısız: %w", err)
 	}
 	conn.Close()
+	return nil
+}
+
+// Close closes the connection pool
+func (c *MLLPClient) Close() error {
+	if c.pool != nil {
+		return c.pool.Close()
+	}
 	return nil
 }

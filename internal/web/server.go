@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -106,17 +107,102 @@ func (s *Server) setupRoutes() {
 }
 
 func (s *Server) handleHealth(c echo.Context) error {
-	health := map[string]interface{}{
-		"status":    "healthy",
-		"timestamp": time.Now(),
-		"components": map[string]string{
-			"nats":          "healthy",
-			"order_server":  "healthy",
-			"report_server": "healthy",
-		},
+	ctx := c.Request().Context()
+	components := make(map[string]string)
+	overallStatus := "healthy"
+
+	// Check NATS JetStream
+	if s.js != nil {
+		_, err := s.js.AccountInfo(ctx)
+		if err != nil {
+			components["nats"] = "unhealthy: " + err.Error()
+			overallStatus = "degraded"
+		} else {
+			components["nats"] = "healthy"
+		}
+	} else {
+		components["nats"] = "unhealthy: not initialized"
+		overallStatus = "unhealthy"
 	}
 
-	return c.JSON(http.StatusOK, health)
+	// Check MLLP servers by checking if streams exist
+	orderStream, err := s.js.Stream(ctx, "HL7_ORDERS")
+	if err != nil {
+		components["order_server"] = "unhealthy: stream not found"
+		overallStatus = "degraded"
+	} else {
+		info, _ := orderStream.Info(ctx)
+		if info != nil {
+			components["order_server"] = fmt.Sprintf("healthy (messages: %d)", info.State.Msgs)
+		} else {
+			components["order_server"] = "healthy"
+		}
+	}
+
+	reportStream, err := s.js.Stream(ctx, "HL7_REPORTS")
+	if err != nil {
+		components["report_server"] = "unhealthy: stream not found"
+		overallStatus = "degraded"
+	} else {
+		info, _ := reportStream.Info(ctx)
+		if info != nil {
+			components["report_server"] = fmt.Sprintf("healthy (messages: %d)", info.State.Msgs)
+		} else {
+			components["report_server"] = "healthy"
+		}
+	}
+
+	// Check KV stores
+	statsKV, err := s.js.KeyValue(ctx, "HL7_STATS")
+	if err != nil {
+		components["stats_store"] = "unhealthy"
+		overallStatus = "degraded"
+	} else {
+		status, _ := statsKV.Status(ctx)
+		if status != nil {
+			components["stats_store"] = fmt.Sprintf("healthy (values: %d)", status.Values())
+		} else {
+			components["stats_store"] = "healthy"
+		}
+	}
+
+	dlqKV, err := s.js.KeyValue(ctx, "HL7_DLQ")
+	if err != nil {
+		components["dlq_store"] = "unhealthy"
+	} else {
+		status, _ := dlqKV.Status(ctx)
+		if status != nil {
+			components["dlq_store"] = fmt.Sprintf("healthy (failed messages: %d)", status.Values())
+		} else {
+			components["dlq_store"] = "healthy"
+		}
+	}
+
+	historyKV, err := s.js.KeyValue(ctx, "HL7_HISTORY")
+	if err != nil {
+		components["history_store"] = "unhealthy"
+	} else {
+		status, _ := historyKV.Status(ctx)
+		if status != nil {
+			components["history_store"] = fmt.Sprintf("healthy (messages: %d)", status.Values())
+		} else {
+			components["history_store"] = "healthy"
+		}
+	}
+
+	health := map[string]interface{}{
+		"status":     overallStatus,
+		"timestamp":  time.Now(),
+		"components": components,
+		"version":    "1.0.0",
+	}
+
+	statusCode := http.StatusOK
+	if overallStatus == "unhealthy" {
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	return c.JSON(statusCode, health)
 }
 
 func (s *Server) handleStats(c echo.Context) error {
@@ -178,46 +264,88 @@ func (s *Server) handleStats(c echo.Context) error {
 
 func (s *Server) handleGetMessages(c echo.Context) error {
 	ctx := c.Request().Context()
-	showFailed := c.QueryParam("status") == "failed"
+	
+	// Query parameters for filtering
+	status := c.QueryParam("status")
+	direction := c.QueryParam("direction")
+	patientID := c.QueryParam("patientId")
+	messageType := c.QueryParam("messageType")
+	limit := 100 // Default limit
 
 	messages := []db.HL7Message{}
 
-	if showFailed {
-		// Get failed messages from DLQ
-		dlqKV, err := s.js.KeyValue(ctx, "HL7_DLQ")
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "DLQ erişilemedi")
-		}
-
-		// List all keys in DLQ
-		keys, err := dlqKV.Keys(ctx)
-		if err != nil {
-			// Return empty array if no keys
-			if err.Error() == "nats: no keys found" {
-				return c.JSON(http.StatusOK, messages)
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "DLQ keys okunamadı: "+err.Error())
-		}
-
-		for _, key := range keys {
-			entry, err := dlqKV.Get(ctx, key)
-			if err != nil {
-				continue
-			}
-
-			var msg db.HL7Message
-			if err := json.Unmarshal(entry.Value(), &msg); err == nil {
-				messages = append(messages, msg)
-			}
-		}
-	} else {
-		// Get recent successful messages (last 100)
-		// For successful messages, we can show basic stats from KV
-		_, err := s.js.KeyValue(ctx, "HL7_STATS")
+	// Get messages from history (all messages)
+	historyKV, err := s.js.KeyValue(ctx, "HL7_HISTORY")
+	if err == nil {
+		keys, err := historyKV.Keys(ctx)
 		if err == nil {
-			// Return empty array for now since we're not storing successful messages
-			// In production, you might want to keep a circular buffer of recent messages
-			return c.JSON(http.StatusOK, messages)
+			for _, key := range keys {
+				entry, err := historyKV.Get(ctx, key)
+				if err != nil {
+					continue
+				}
+
+				var msg db.HL7Message
+				if err := json.Unmarshal(entry.Value(), &msg); err == nil {
+					// Apply filters
+					if status != "" && msg.Status != status {
+						continue
+					}
+					if direction != "" && msg.Direction != direction {
+						continue
+					}
+					if patientID != "" && (msg.PatientID == "" || !contains(msg.PatientID, patientID)) {
+						continue
+					}
+					if messageType != "" && (msg.MessageType == "" || !contains(msg.MessageType, messageType)) {
+						continue
+					}
+					
+					messages = append(messages, msg)
+				}
+			}
+		}
+	}
+
+	// Also get failed messages from DLQ if showing all or failed status
+	if status == "" || status == "failed" {
+		dlqKV, err := s.js.KeyValue(ctx, "HL7_DLQ")
+		if err == nil {
+			keys, err := dlqKV.Keys(ctx)
+			if err == nil {
+				for _, key := range keys {
+					entry, err := dlqKV.Get(ctx, key)
+					if err != nil {
+						continue
+					}
+
+					var msg db.HL7Message
+					if err := json.Unmarshal(entry.Value(), &msg); err == nil {
+						// Apply filters
+						if direction != "" && msg.Direction != direction {
+							continue
+						}
+						if patientID != "" && (msg.PatientID == "" || !contains(msg.PatientID, patientID)) {
+							continue
+						}
+						if messageType != "" && (msg.MessageType == "" || !contains(msg.MessageType, messageType)) {
+							continue
+						}
+						
+						// Check if already in messages (from history)
+						found := false
+						for _, m := range messages {
+							if m.ID == msg.ID && m.Timestamp.Equal(msg.Timestamp) {
+								found = true
+								break
+							}
+						}
+						if !found {
+							messages = append(messages, msg)
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -225,18 +353,95 @@ func (s *Server) handleGetMessages(c echo.Context) error {
 	sort.Slice(messages, func(i, j int) bool {
 		return messages[i].Timestamp.After(messages[j].Timestamp)
 	})
+	
+	// Apply limit
+	if len(messages) > limit {
+		messages = messages[:limit]
+	}
 
 	return c.JSON(http.StatusOK, messages)
 }
 
-func (s *Server) handleRetryMessage(c echo.Context) error {
-	// messageID := c.Param("id")
+// Helper function to check if a string contains a substring (case-insensitive)
+func contains(s, substr string) bool {
+	return len(s) > 0 && len(substr) > 0 && 
+		bytes.Contains(bytes.ToLower([]byte(s)), bytes.ToLower([]byte(substr)))
+}
 
-	// This would republish the message to the appropriate stream
-	// For now, return success
+func (s *Server) handleRetryMessage(c echo.Context) error {
+	ctx := c.Request().Context()
+	messageID := c.Param("id")
+
+	// Find the message in DLQ
+	dlqKV, err := s.js.KeyValue(ctx, "HL7_DLQ")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "DLQ erişilemedi")
+	}
+
+	// Try to find the message
+	var foundMsg *db.HL7Message
+	var foundKey string
+	
+	keys, err := dlqKV.Keys(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Mesaj bulunamadı")
+	}
+
+	for _, key := range keys {
+		entry, err := dlqKV.Get(ctx, key)
+		if err != nil {
+			continue
+		}
+
+		var msg db.HL7Message
+		if err := json.Unmarshal(entry.Value(), &msg); err == nil {
+			if msg.ID == messageID {
+				foundMsg = &msg
+				foundKey = key
+				break
+			}
+		}
+	}
+
+	if foundMsg == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Mesaj bulunamadı")
+	}
+
+	// Determine which stream to republish to
+	streamName := "HL7_ORDERS"
+	if foundMsg.Direction == "report" {
+		streamName = "HL7_REPORTS"
+	}
+
+	// Reset retry count and status
+	foundMsg.RetryCount = 0
+	foundMsg.Status = "pending"
+	foundMsg.LastError = ""
+
+	// Republish to the appropriate stream
+	msgData, err := json.Marshal(foundMsg)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Mesaj serialize edilemedi")
+	}
+
+	if _, err := s.js.Publish(ctx, streamName, msgData); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Mesaj yeniden gönderilemedi: "+err.Error())
+	}
+
+	// Remove from DLQ
+	if err := dlqKV.Delete(ctx, foundKey); err != nil {
+		slog.Error("DLQ'dan mesaj silinemedi", "key", foundKey, "error", err)
+	}
+
+	slog.Info("Mesaj yeniden kuyruğa alındı", 
+		"messageID", messageID, 
+		"stream", streamName,
+		"direction", foundMsg.Direction)
+
 	return c.JSON(http.StatusOK, map[string]string{
 		"status":  "success",
 		"message": "Mesaj yeniden kuyruğa alındı",
+		"stream":  streamName,
 	})
 }
 

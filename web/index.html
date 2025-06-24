@@ -48,6 +48,31 @@
                 </div>
             </div>
 
+            <!-- Connection Status -->
+            <div class="bg-white rounded-lg shadow p-4 mb-6">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Bağlantı Durumu</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="flex items-center justify-between p-3 border rounded-lg">
+                        <span class="font-medium">NATS JetStream</span>
+                        <span x-text="getComponentStatus('nats')" 
+                              :class="getComponentClass('nats')"
+                              class="text-sm font-semibold"></span>
+                    </div>
+                    <div class="flex items-center justify-between p-3 border rounded-lg">
+                        <span class="font-medium">Order Server (HIS→ZenPACS)</span>
+                        <span x-text="getComponentStatus('order_server')" 
+                              :class="getComponentClass('order_server')"
+                              class="text-sm font-semibold"></span>
+                    </div>
+                    <div class="flex items-center justify-between p-3 border rounded-lg">
+                        <span class="font-medium">Report Server (ZenPACS→HIS)</span>
+                        <span x-text="getComponentStatus('report_server')" 
+                              :class="getComponentClass('report_server')"
+                              class="text-sm font-semibold"></span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Filters -->
             <div class="bg-white rounded-lg shadow p-4 mb-6">
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -88,7 +113,7 @@
             <!-- Messages Table -->
             <div class="bg-white rounded-lg shadow overflow-hidden">
                 <div class="px-4 py-3 border-b border-gray-200">
-                    <h2 class="text-lg font-semibold text-gray-900">Başarısız HL7 Mesajları (Dead Letter Queue)</h2>
+                    <h2 class="text-lg font-semibold text-gray-900">HL7 Mesaj Geçmişi</h2>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200">

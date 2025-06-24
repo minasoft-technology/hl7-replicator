@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/minasoft/hl7-replicator/internal/config"
@@ -14,10 +15,12 @@ import (
 )
 
 type MessageForwarder struct {
-	js      jetstream.JetStream
-	config  *config.Config
-	statsKV jetstream.KeyValue
-	dlqKV   jetstream.KeyValue
+	js        jetstream.JetStream
+	config    *config.Config
+	statsKV   jetstream.KeyValue
+	dlqKV     jetstream.KeyValue
+	historyKV jetstream.KeyValue
+	statsMu   sync.Mutex
 }
 
 func NewMessageForwarder(js jetstream.JetStream, cfg *config.Config) *MessageForwarder {
@@ -34,12 +37,19 @@ func NewMessageForwarder(js jetstream.JetStream, cfg *config.Config) *MessageFor
 	if err != nil {
 		slog.Error("DLQ KV store erişilemedi", "error", err)
 	}
+	
+	// Get History KV store
+	historyKV, err := js.KeyValue(ctx, "HL7_HISTORY")
+	if err != nil {
+		slog.Error("History KV store erişilemedi", "error", err)
+	}
 
 	return &MessageForwarder{
-		js:      js,
-		config:  cfg,
-		statsKV: statsKV,
-		dlqKV:   dlqKV,
+		js:        js,
+		config:    cfg,
+		statsKV:   statsKV,
+		dlqKV:     dlqKV,
+		historyKV: historyKV,
 	}
 }
 
@@ -144,26 +154,26 @@ func (f *MessageForwarder) processOrderMessage(msg jetstream.Msg, client *hl7.ML
 
 	// Get message metadata to check redelivery count
 	meta, _ := msg.Metadata()
-	if meta != nil && meta.NumDelivered > 1 {
-		hl7Msg.RetryCount = int(meta.NumDelivered - 1)
-	}
 
 	slog.Info("Order mesajı işleniyor",
 		"id", hl7Msg.ID,
 		"messageType", hl7Msg.MessageType,
-		"patientID", hl7Msg.PatientID)
+		"patientID", hl7Msg.PatientID,
+		"deliveryAttempt", meta.NumDelivered)
 
 	// Forward message
 	err := client.SendMessage(hl7Msg.RawMessage)
 	if err != nil {
 		hl7Msg.Status = "failed"
 		hl7Msg.LastError = err.Error()
-		hl7Msg.RetryCount++
+		if meta != nil {
+			hl7Msg.RetryCount = int(meta.NumDelivered)
+		}
 
 		slog.Error("Order mesaj gönderme hatası",
 			"id", hl7Msg.ID,
 			"error", err,
-			"retryCount", hl7Msg.RetryCount)
+			"deliveryAttempt", meta.NumDelivered)
 
 		// Update statistics
 		if f.statsKV != nil {
@@ -175,11 +185,14 @@ func (f *MessageForwarder) processOrderMessage(msg jetstream.Msg, client *hl7.ML
 		}
 
 		// Save to DLQ after max retries
-		if hl7Msg.RetryCount >= 5 && f.dlqKV != nil {
+		if meta != nil && meta.NumDelivered >= 5 && f.dlqKV != nil {
+			hl7Msg.Direction = "order"
 			dlqKey := fmt.Sprintf("order_%s_%d", hl7Msg.ID, time.Now().Unix())
 			dlqData, _ := json.Marshal(hl7Msg)
 			f.dlqKV.Put(context.Background(), dlqKey, dlqData)
-			slog.Warn("Mesaj DLQ'ya kaydedildi", "id", hl7Msg.ID, "key", dlqKey)
+			slog.Warn("Mesaj DLQ'ya kaydedildi", "id", hl7Msg.ID, "key", dlqKey, "attempts", meta.NumDelivered)
+			// Save to history
+			f.saveToHistory(&hl7Msg)
 			// ACK to remove from stream after saving to DLQ
 			msg.Ack()
 			return
@@ -194,6 +207,7 @@ func (f *MessageForwarder) processOrderMessage(msg jetstream.Msg, client *hl7.ML
 	hl7Msg.Status = "forwarded"
 	now := time.Now()
 	hl7Msg.ProcessedAt = &now
+	hl7Msg.Direction = "order"
 
 	// Update KV statistics
 	if f.statsKV != nil {
@@ -205,6 +219,9 @@ func (f *MessageForwarder) processOrderMessage(msg jetstream.Msg, client *hl7.ML
 	slog.Info("Order mesajı başarıyla gönderildi",
 		"id", hl7Msg.ID,
 		"destination", fmt.Sprintf("%s:%d", f.config.ZenPACSHost, f.config.ZenPACSPort))
+	
+	// Save to history
+	f.saveToHistory(&hl7Msg)
 
 	// ACK message
 	msg.Ack()
@@ -221,23 +238,18 @@ func (f *MessageForwarder) processReportMessage(msg jetstream.Msg, client *hl7.M
 
 	// Get message metadata to check redelivery count
 	meta, _ := msg.Metadata()
-	if meta != nil && meta.NumDelivered > 1 {
-		hl7Msg.RetryCount = int(meta.NumDelivered - 1)
-	}
 
 	slog.Info("Report mesajı işleniyor",
 		"id", hl7Msg.ID,
 		"messageType", hl7Msg.MessageType,
-		"patientID", hl7Msg.PatientID)
+		"patientID", hl7Msg.PatientID,
+		"deliveryAttempt", meta.NumDelivered)
 
 	// Forward message
 	err := client.SendMessage(hl7Msg.RawMessage)
 	if err != nil {
 		hl7Msg.Status = "failed"
 		hl7Msg.LastError = err.Error()
-
-		// Get actual retry count from metadata
-		meta, _ := msg.Metadata()
 		if meta != nil {
 			hl7Msg.RetryCount = int(meta.NumDelivered)
 		}
@@ -245,8 +257,7 @@ func (f *MessageForwarder) processReportMessage(msg jetstream.Msg, client *hl7.M
 		slog.Error("Report mesaj gönderme hatası",
 			"id", hl7Msg.ID,
 			"error", err,
-			"retryCount", hl7Msg.RetryCount,
-			"deliveries", meta.NumDelivered)
+			"deliveryAttempt", meta.NumDelivered)
 
 		// Update statistics
 		if f.statsKV != nil {
@@ -259,10 +270,13 @@ func (f *MessageForwarder) processReportMessage(msg jetstream.Msg, client *hl7.M
 
 		// Save to DLQ after max retries
 		if meta != nil && meta.NumDelivered >= 5 && f.dlqKV != nil {
+			hl7Msg.Direction = "report"
 			dlqKey := fmt.Sprintf("report_%s_%d", hl7Msg.ID, time.Now().Unix())
 			dlqData, _ := json.Marshal(hl7Msg)
 			f.dlqKV.Put(context.Background(), dlqKey, dlqData)
-			slog.Warn("Mesaj DLQ'ya kaydedildi", "id", hl7Msg.ID, "key", dlqKey, "retries", meta.NumDelivered)
+			slog.Warn("Mesaj DLQ'ya kaydedildi", "id", hl7Msg.ID, "key", dlqKey, "attempts", meta.NumDelivered)
+			// Save to history
+			f.saveToHistory(&hl7Msg)
 			// ACK to remove from stream after saving to DLQ
 			msg.Ack()
 			return
@@ -277,6 +291,7 @@ func (f *MessageForwarder) processReportMessage(msg jetstream.Msg, client *hl7.M
 	hl7Msg.Status = "forwarded"
 	now := time.Now()
 	hl7Msg.ProcessedAt = &now
+	hl7Msg.Direction = "report"
 
 	// Update KV statistics
 	if f.statsKV != nil {
@@ -288,15 +303,44 @@ func (f *MessageForwarder) processReportMessage(msg jetstream.Msg, client *hl7.M
 	slog.Info("Report mesajı başarıyla gönderildi",
 		"id", hl7Msg.ID,
 		"destination", fmt.Sprintf("%s:%d", f.config.HospitalHISHost, f.config.HospitalHISPort))
+	
+	// Save to history
+	f.saveToHistory(&hl7Msg)
 
 	// ACK message
 	msg.Ack()
+}
+
+func (f *MessageForwarder) saveToHistory(msg *db.HL7Message) {
+	if f.historyKV == nil {
+		return
+	}
+	
+	// Create unique key with timestamp
+	key := fmt.Sprintf("%s_%s_%d", msg.Direction, msg.ID, time.Now().UnixNano())
+	
+	// Marshal message
+	data, err := json.Marshal(msg)
+	if err != nil {
+		slog.Error("Mesaj history'ye kaydedilemedi", "error", err, "id", msg.ID)
+		return
+	}
+	
+	// Save to history
+	ctx := context.Background()
+	if _, err := f.historyKV.Put(ctx, key, data); err != nil {
+		slog.Error("History KV put hatası", "error", err, "key", key)
+	}
 }
 
 func (f *MessageForwarder) incrementKVCounter(key string) {
 	if f.statsKV == nil {
 		return
 	}
+
+	// Lock for thread-safe counter increment
+	f.statsMu.Lock()
+	defer f.statsMu.Unlock()
 
 	ctx := context.Background()
 	entry, err := f.statsKV.Get(ctx, key)

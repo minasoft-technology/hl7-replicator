@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  hl7-replicator:
+    image: ghcr.io/minasoftweb/hl7-replicator:latest
+    container_name: hl7-replicator
+    restart: unless-stopped
+    ports:
+      - "7001:7001"  # Order receiver (HIS -> ZenPACS)
+      - "7002:7002"  # Report receiver (ZenPACS -> HIS)  
+      - "5678:5678"  # Web dashboard
+    environment:
+      # HL7 Listener Ports
+      - ORDER_LISTEN_PORT=7001
+      - REPORT_LISTEN_PORT=7002
+      
+      # ZenPACS endpoint (fixed)
+      - ZENPACS_HL7_HOST=194.187.253.34
+      - ZENPACS_HL7_PORT=2575
+      
+      # Hospital HIS endpoint (must be configured per hospital)
+      - HOSPITAL_HIS_HOST=${HOSPITAL_HIS_HOST}
+      - HOSPITAL_HIS_PORT=${HOSPITAL_HIS_PORT}
+      
+      # Web dashboard
+      - WEB_PORT=5678
+      
+      # Data storage
+      - DB_PATH=/data
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - hl7-data:/data
+    networks:
+      - hl7-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5678/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  hl7-network:
+    driver: bridge
+
+volumes:
+  hl7-data:
+    driver: local

@@ -19,6 +19,10 @@ function dashboard() {
         showModal: false,
         selectedMessage: null,
         refreshInterval: null,
+        healthData: {
+            status: 'unknown',
+            components: {}
+        },
 
         async init() {
             await this.loadStats();
@@ -44,8 +48,14 @@ function dashboard() {
 
         async loadMessages() {
             try {
-                // Load only failed messages from DLQ
-                const response = await fetch('/api/messages?status=failed');
+                // Build query params
+                const params = new URLSearchParams();
+                if (this.filters.status) params.append('status', this.filters.status);
+                if (this.filters.direction) params.append('direction', this.filters.direction);
+                if (this.filters.patientId) params.append('patientId', this.filters.patientId);
+                if (this.filters.messageType) params.append('messageType', this.filters.messageType);
+                
+                const response = await fetch(`/api/messages?${params}`);
                 if (response.ok) {
                     const data = await response.json();
                     // Check if it's an error response
@@ -54,11 +64,12 @@ function dashboard() {
                     } else {
                         this.messages = data;
                     }
-                    this.filterMessages();
+                    this.filteredMessages = this.messages;
                 }
             } catch (error) {
                 console.error('Mesaj yükleme hatası:', error);
                 this.messages = [];
+                this.filteredMessages = [];
             }
         },
 
@@ -67,9 +78,14 @@ function dashboard() {
                 const response = await fetch('/api/health');
                 if (response.ok) {
                     const health = await response.json();
+                    this.healthData = health;
+                    
                     if (health.status === 'healthy') {
                         this.status = 'Çalışıyor';
                         this.statusClass = 'text-green-300';
+                    } else if (health.status === 'degraded') {
+                        this.status = 'Kısmi Sorun';
+                        this.statusClass = 'text-yellow-300';
                     } else {
                         this.status = 'Sorun Var';
                         this.statusClass = 'text-red-300';
@@ -85,21 +101,8 @@ function dashboard() {
         },
 
         filterMessages() {
-            this.filteredMessages = this.messages.filter(msg => {
-                if (this.filters.direction && msg.direction !== this.filters.direction) {
-                    return false;
-                }
-                if (this.filters.status && msg.status !== this.filters.status) {
-                    return false;
-                }
-                if (this.filters.patientId && !msg.patient_id?.includes(this.filters.patientId)) {
-                    return false;
-                }
-                if (this.filters.messageType && !msg.message_type?.includes(this.filters.messageType)) {
-                    return false;
-                }
-                return true;
-            });
+            // Reload messages with new filters from server
+            this.loadMessages();
         },
 
         async refreshData() {
@@ -170,6 +173,31 @@ function dashboard() {
                 default:
                     return status;
             }
+        },
+
+        getComponentStatus(component) {
+            const status = this.healthData.components[component];
+            if (!status) return 'Bilinmiyor';
+            
+            if (status.includes('healthy')) {
+                const match = status.match(/\(([^)]+)\)/);
+                return match ? `Aktif ${match[0]}` : 'Aktif';
+            } else if (status.includes('unhealthy')) {
+                return 'Çevrimdışı';
+            }
+            return status;
+        },
+
+        getComponentClass(component) {
+            const status = this.healthData.components[component];
+            if (!status) return 'text-gray-500';
+            
+            if (status.includes('healthy')) {
+                return 'text-green-600';
+            } else if (status.includes('unhealthy')) {
+                return 'text-red-600';
+            }
+            return 'text-yellow-600';
         },
 
         destroy() {
