@@ -34,12 +34,8 @@ services:
       - ./data:/data
     networks:
       - hl7-network
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:5678/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    # Health check removed as distroless doesn't have wget/curl
+    # The application has built-in health endpoint at /api/health
 
 networks:
   hl7-network:

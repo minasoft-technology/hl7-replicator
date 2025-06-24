@@ -1,0 +1,49 @@
+# Git files
+.git
+.gitignore
+.github/
+
+# Documentation
+*.md
+docs/
+LICENSE
+
+# Test files
+*_test.go
+test-*.txt
+testdata/
+
+# Development files
+.env
+.env.*
+*.log
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+hl7-replicator
+dist/
+build/
+
+# Docker files
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Data files
+data/
+*.db
+
+# Coverage files
+coverage.txt
+coverage.html
+*.cov

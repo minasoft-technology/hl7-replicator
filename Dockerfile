@@ -2,12 +2,12 @@
 FROM golang:1.21-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git
+RUN apk add --no-cache git ca-certificates tzdata
 
 # Set working directory
-WORKDIR /app
+WORKDIR /build
 
-# Copy go mod files
+# Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
 # Download dependencies
@@ -16,41 +16,35 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o hl7-replicator ./cmd/server
+# Build the application with optimizations
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -ldflags="-w -s -extldflags '-static'" \
+    -a -installsuffix cgo \
+    -o hl7-replicator ./cmd/server
 
-# Final stage
-FROM alpine:latest
+# Compress binary with UPX (optional, saves ~50% size)
+RUN apk add --no-cache upx && \
+    upx --best --lzma hl7-replicator || true
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates tzdata
+# Final stage - using distroless for security and minimal size
+FROM gcr.io/distroless/static:nonroot
 
-# Create non-root user
-RUN addgroup -g 1000 -S app && \
-    adduser -u 1000 -S app -G app
+# Copy timezone data from builder
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
 # Set timezone to Istanbul
 ENV TZ=Europe/Istanbul
 
-# Create data directory
-RUN mkdir -p /data && chown -R app:app /data
-
-WORKDIR /app
-
 # Copy binary from builder
-COPY --from=builder /app/hl7-replicator .
+COPY --from=builder /build/hl7-replicator /hl7-replicator
 
-# Change ownership
-RUN chown -R app:app /app
-
-# Switch to non-root user
-USER app
+# The distroless image runs as nonroot user by default (uid 65532)
+# No need to create user or change permissions
 
 # Expose ports
 EXPOSE 7001 7002 5678
 
-# Volume for persistent data
-VOLUME ["/data"]
-
 # Run the application
-CMD ["./hl7-replicator"]
+ENTRYPOINT ["/hl7-replicator"]
