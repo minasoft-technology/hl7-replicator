@@ -22,7 +22,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      id-token: write # Required for attestation
 
     steps:
       - name: Checkout repository
@@ -66,11 +65,3 @@ jobs:
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
-      - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v1
-        if: ${{ github.event_name != 'pull_request' }}
-        continue-on-error: true
-        with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
