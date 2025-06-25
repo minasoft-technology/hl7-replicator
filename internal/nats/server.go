@@ -175,20 +175,20 @@ func (es *EmbeddedServer) createKVStore() error {
 	}
 
 	slog.Info("HL7_DLQ KV store oluşturuldu")
-	
+
 	// Create KV store for message history (all messages)
 	_, err = es.js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
 		Bucket:      "HL7_HISTORY",
 		Description: "Son HL7 mesaj geçmişi (tüm mesajlar)",
-		History:     1,                  // Keep only latest version
-		TTL:         24 * time.Hour,     // 1 day
-		MaxBytes:    500 * 1024 * 1024,  // 500MB
+		History:     1,                 // Keep only latest version
+		TTL:         24 * time.Hour,    // 1 day
+		MaxBytes:    500 * 1024 * 1024, // 500MB
 		Storage:     jetstream.FileStorage,
 	})
 	if err != nil {
 		return fmt.Errorf("History KV store oluşturulamadı: %w", err)
 	}
-	
+
 	slog.Info("HL7_HISTORY KV store oluşturuldu")
 	return nil
 }

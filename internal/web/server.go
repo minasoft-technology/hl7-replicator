@@ -264,7 +264,7 @@ func (s *Server) handleStats(c echo.Context) error {
 
 func (s *Server) handleGetMessages(c echo.Context) error {
 	ctx := c.Request().Context()
-	
+
 	// Query parameters for filtering
 	status := c.QueryParam("status")
 	direction := c.QueryParam("direction")
@@ -300,7 +300,7 @@ func (s *Server) handleGetMessages(c echo.Context) error {
 					if messageType != "" && (msg.MessageType == "" || !contains(msg.MessageType, messageType)) {
 						continue
 					}
-					
+
 					messages = append(messages, msg)
 				}
 			}
@@ -331,7 +331,7 @@ func (s *Server) handleGetMessages(c echo.Context) error {
 						if messageType != "" && (msg.MessageType == "" || !contains(msg.MessageType, messageType)) {
 							continue
 						}
-						
+
 						// Check if already in messages (from history)
 						found := false
 						for _, m := range messages {
@@ -353,7 +353,7 @@ func (s *Server) handleGetMessages(c echo.Context) error {
 	sort.Slice(messages, func(i, j int) bool {
 		return messages[i].Timestamp.After(messages[j].Timestamp)
 	})
-	
+
 	// Apply limit
 	if len(messages) > limit {
 		messages = messages[:limit]
@@ -364,7 +364,7 @@ func (s *Server) handleGetMessages(c echo.Context) error {
 
 // Helper function to check if a string contains a substring (case-insensitive)
 func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && 
+	return len(s) > 0 && len(substr) > 0 &&
 		bytes.Contains(bytes.ToLower([]byte(s)), bytes.ToLower([]byte(substr)))
 }
 
@@ -381,7 +381,7 @@ func (s *Server) handleRetryMessage(c echo.Context) error {
 	// Try to find the message
 	var foundMsg *db.HL7Message
 	var foundKey string
-	
+
 	keys, err := dlqKV.Keys(ctx)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Mesaj bulunamadı")
@@ -433,8 +433,8 @@ func (s *Server) handleRetryMessage(c echo.Context) error {
 		slog.Error("DLQ'dan mesaj silinemedi", "key", foundKey, "error", err)
 	}
 
-	slog.Info("Mesaj yeniden kuyruğa alındı", 
-		"messageID", messageID, 
+	slog.Info("Mesaj yeniden kuyruğa alındı",
+		"messageID", messageID,
 		"stream", streamName,
 		"direction", foundMsg.Direction)
 

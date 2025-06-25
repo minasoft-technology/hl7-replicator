@@ -20,10 +20,10 @@ type ConnectionPool struct {
 }
 
 type poolConn struct {
-	conn       net.Conn
-	lastUsed   time.Time
-	pool       *ConnectionPool
-	inUse      bool
+	conn     net.Conn
+	lastUsed time.Time
+	pool     *ConnectionPool
+	inUse    bool
 }
 
 // NewConnectionPool creates a new connection pool
@@ -31,7 +31,7 @@ func NewConnectionPool(host string, port int, maxConns int) *ConnectionPool {
 	if maxConns <= 0 {
 		maxConns = 5
 	}
-	
+
 	pool := &ConnectionPool{
 		host:        host,
 		port:        port,
@@ -40,10 +40,10 @@ func NewConnectionPool(host string, port int, maxConns int) *ConnectionPool {
 		connections: make(chan *poolConn, maxConns),
 		closed:      false,
 	}
-	
+
 	// Start health check routine
 	go pool.healthCheck()
-	
+
 	return pool
 }
 
@@ -55,7 +55,7 @@ func (p *ConnectionPool) Get() (net.Conn, error) {
 		return nil, fmt.Errorf("connection pool is closed")
 	}
 	p.mu.Unlock()
-	
+
 	// Try to get an existing connection
 	select {
 	case pc := <-p.connections:
@@ -70,29 +70,29 @@ func (p *ConnectionPool) Get() (net.Conn, error) {
 	default:
 		// No connections available
 	}
-	
+
 	// Create new connection
 	addr := fmt.Sprintf("%s:%d", p.host, p.port)
 	conn, err := net.DialTimeout("tcp", addr, p.timeout)
 	if err != nil {
 		return nil, fmt.Errorf("bağlantı hatası %s: %w", addr, err)
 	}
-	
+
 	// Set keep-alive
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		tcpConn.SetKeepAlive(true)
 		tcpConn.SetKeepAlivePeriod(30 * time.Second)
 	}
-	
+
 	pc := &poolConn{
 		conn:     conn,
 		lastUsed: time.Now(),
 		pool:     p,
 		inUse:    true,
 	}
-	
+
 	slog.Debug("Yeni bağlantı oluşturuldu", "address", addr)
-	
+
 	return &wrappedConn{Conn: conn, pc: pc}, nil
 }
 
@@ -100,15 +100,15 @@ func (p *ConnectionPool) Get() (net.Conn, error) {
 func (p *ConnectionPool) Put(pc *poolConn) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	if p.closed {
 		pc.conn.Close()
 		return
 	}
-	
+
 	pc.inUse = false
 	pc.lastUsed = time.Now()
-	
+
 	// Try to return to pool
 	select {
 	case p.connections <- pc:
@@ -123,19 +123,19 @@ func (p *ConnectionPool) Put(pc *poolConn) {
 func (p *ConnectionPool) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	if p.closed {
 		return nil
 	}
-	
+
 	p.closed = true
 	close(p.connections)
-	
+
 	// Close all connections
 	for pc := range p.connections {
 		pc.conn.Close()
 	}
-	
+
 	return nil
 }
 
@@ -143,19 +143,19 @@ func (p *ConnectionPool) Close() error {
 func (p *ConnectionPool) isConnectionAlive(conn net.Conn) bool {
 	// Set a very short deadline
 	conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
-	
+
 	// Try to read one byte
 	one := make([]byte, 1)
 	_, err := conn.Read(one)
-	
+
 	// Reset the deadline
 	conn.SetReadDeadline(time.Time{})
-	
+
 	// If we got a timeout, the connection is probably still alive
 	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 		return true
 	}
-	
+
 	// Any other error means the connection is dead
 	return err == nil
 }
@@ -164,7 +164,7 @@ func (p *ConnectionPool) isConnectionAlive(conn net.Conn) bool {
 func (p *ConnectionPool) healthCheck() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		p.mu.Lock()
 		if p.closed {
@@ -172,10 +172,10 @@ func (p *ConnectionPool) healthCheck() {
 			return
 		}
 		p.mu.Unlock()
-		
+
 		// Check connections
 		var healthy []*poolConn
-		
+
 		for {
 			select {
 			case pc := <-p.connections:
@@ -183,14 +183,14 @@ func (p *ConnectionPool) healthCheck() {
 					healthy = append(healthy, pc)
 					continue
 				}
-				
+
 				// Check if connection is stale (unused for > 5 minutes)
 				if time.Since(pc.lastUsed) > 5*time.Minute {
 					pc.conn.Close()
 					slog.Debug("Eski bağlantı kapatıldı", "age", time.Since(pc.lastUsed))
 					continue
 				}
-				
+
 				// Check if connection is alive
 				if p.isConnectionAlive(pc.conn) {
 					healthy = append(healthy, pc)
@@ -203,7 +203,7 @@ func (p *ConnectionPool) healthCheck() {
 				goto done
 			}
 		}
-		
+
 	done:
 		// Return healthy connections to pool
 		for _, pc := range healthy {
@@ -227,13 +227,13 @@ type wrappedConn struct {
 func (w *wrappedConn) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	
+
 	if w.closed {
 		return nil
 	}
-	
+
 	w.closed = true
-	
+
 	// Return to pool instead of closing
 	w.pc.pool.Put(w.pc)
 	return nil

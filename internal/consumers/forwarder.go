@@ -37,7 +37,7 @@ func NewMessageForwarder(js jetstream.JetStream, cfg *config.Config) *MessageFor
 	if err != nil {
 		slog.Error("DLQ KV store erişilemedi", "error", err)
 	}
-	
+
 	// Get History KV store
 	historyKV, err := js.KeyValue(ctx, "HL7_HISTORY")
 	if err != nil {
@@ -219,7 +219,7 @@ func (f *MessageForwarder) processOrderMessage(msg jetstream.Msg, client *hl7.ML
 	slog.Info("Order mesajı başarıyla gönderildi",
 		"id", hl7Msg.ID,
 		"destination", fmt.Sprintf("%s:%d", f.config.ZenPACSHost, f.config.ZenPACSPort))
-	
+
 	// Save to history
 	f.saveToHistory(&hl7Msg)
 
@@ -303,7 +303,7 @@ func (f *MessageForwarder) processReportMessage(msg jetstream.Msg, client *hl7.M
 	slog.Info("Report mesajı başarıyla gönderildi",
 		"id", hl7Msg.ID,
 		"destination", fmt.Sprintf("%s:%d", f.config.HospitalHISHost, f.config.HospitalHISPort))
-	
+
 	// Save to history
 	f.saveToHistory(&hl7Msg)
 
@@ -315,17 +315,17 @@ func (f *MessageForwarder) saveToHistory(msg *db.HL7Message) {
 	if f.historyKV == nil {
 		return
 	}
-	
+
 	// Create unique key with timestamp
 	key := fmt.Sprintf("%s_%s_%d", msg.Direction, msg.ID, time.Now().UnixNano())
-	
+
 	// Marshal message
 	data, err := json.Marshal(msg)
 	if err != nil {
 		slog.Error("Mesaj history'ye kaydedilemedi", "error", err, "id", msg.ID)
 		return
 	}
-	
+
 	// Save to history
 	ctx := context.Background()
 	if _, err := f.historyKV.Put(ctx, key, data); err != nil {
